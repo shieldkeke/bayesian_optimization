@@ -2,54 +2,87 @@
 #include <vector>
 #include <eigen3/Eigen/Dense>
 
-template<typename T>
-
-double Gaussian_process_Regression(std::vector<T> pre_position, std::vector<T> pre_gradient,double predict_position)
+typedef struct
 {
-	std::vector<T> position = {}, gradient = {};
-	position = pre_position;
-    gradient = pre_gradient;
-	Eigen::MatrixXd  K(position.size(), position.size());
-	Eigen::MatrixXd  K_s(1, position.size());
-	Eigen::MatrixXd  Y(position.size(), 1);
-	Eigen::MatrixXd  result(1, 1);
+	std::vector<double> mu, cov;
+}GP;
+
+Eigen::MatrixXd Gaussian_Kernal(Eigen::MatrixXd x1, Eigen::MatrixXd x2){
 	//hyperparam
-	double sigema_f = 1.27, l = 1,sigema_n = 0.3;
-	double K_ss = pow(sigema_f, 2) + pow(sigema_n, 2);
-    
-	for (int i = 0; i < position.size(); i++)
-	{
-		for (int j = 0; j < position.size(); j++)
-		{	
-			double rectify;
-			rectify = (i == j) ? pow(sigema_n, 2) : 0;
-			K(i, j) = pow(sigema_f, 2) * exp(-pow(position[i] - position[j], 2) / (2 * pow(l, 2))) + rectify;
+	double sigema_f = 0.2, l = 0.5;
+	Eigen::MatrixXd dist(x1.rows(), x2.rows());
+	for (int i = 0; i < x1.rows(); i++){
+		for (int j = 0; j < x2.rows(); j++){
+			dist(i,j) =x1.row(i).dot(x1.row(i)) + x2.row(j).dot(x2.row(j)) - 2 * x1.row(i).dot(x2.row(j));
 		}
 	}
-	for (int i = 0; i < position.size(); i++)
-	{
-		K_s(0,i)= pow(sigema_f, 2) * exp(-pow(predict_position - position[i], 2) / (2 * pow(l, 2))) ;
+	return pow(sigema_f, 2) * (-0.5 / pow(l, 2) * dist).array().exp();
+}
+
+GP Gaussian_Process_Regression(std::vector<Eigen::VectorXd> train_X, std::vector<double> train_Y,std::vector<Eigen::VectorXd> predict_X)
+{
+	
+	GP ret;
+	int n_train = train_X.size(), n_pre = predict_X.size(), m = train_X[0].rows(); //data numbers and dimension
+	Eigen::MatrixXd train_x(n_train, m), predict_x(n_pre, m), kfy(n_train, n_pre), kff(n_train, n_train), kyy(n_pre, n_pre), kff_inv(n_train, n_train);
+	Eigen::VectorXd train_y(n_train);
+    // std::cout<<n_train<<" "<<n_pre<<" "<<m<<std::endl;
+
+	//errors
+	if (train_X.size() == 0 || predict_X.size() == 0){
+		std::cout<<"size = 0!"<<std::endl;
+		return ret;
 	}
-	for (int i = 0; i < gradient.size(); i++)
-	{
-		Y(i, 0) = gradient[i];
+	if (train_X.size() != train_Y.size()){
+		std::cout<<"not the same length of train X and Y"<<std::endl;
+		return ret;
 	}
-	result = K_s * K.inverse() * Y;
-	return result(0,0);
+	if (train_X[0].rows() != predict_X[0].rows()){
+		std::cout<<"not the same form of data"<<std::endl;
+		return ret;
+	} 
+
+	
+	//transfer from vector to matrix
+	for (int i=0; i<train_X.size(); i++){
+		train_x.row(i) = train_X[i];
+		train_y(i) = train_Y[i];
+	}
+	for (int i=0; i<predict_X.size(); i++){
+		predict_x.row(i) = predict_X[i];
+	}
+	kfy = Gaussian_Kernal(train_x, predict_x);
+	kyy = Gaussian_Kernal(predict_x, predict_x);
+	kff = Gaussian_Kernal(train_x, train_x);
+	kff_inv = (kff + 1e-8 * Eigen::MatrixXd::Identity(n_train, n_train)).inverse() ;   
+	Eigen::MatrixXd mu(n_pre, 1), cov(n_pre, n_pre);
+	mu = kfy.transpose()*kff_inv*train_y;
+	cov = kyy - kfy.transpose()*kff_inv*kfy;
+	for (int i=0; i<n_pre; i++){
+		ret.mu.push_back(mu(i,0));
+		ret.cov.push_back(cov(i,i));
+	}
+	return ret;
 }
 
 int main()
 {
-    std::vector<int> pre_position = { 1583,1584,1585,1586,1587,1588,1589 };
-    std::vector<int> pre_gradient = { 2,23,114,246,245,114,23 };
-    double predict_position=1583;
-    double result;
-    for (float i = predict_position; i < 1589; i += 0.5)
-    {
-        result= Gaussian_process_Regression(pre_position, pre_gradient, i);
-        std::cout << result << "  ";
-    }
-    std::cout << std::endl;
-   
+	Eigen::VectorXd vec(2); // length of the vector
+	
+	std::vector<Eigen::VectorXd> train_x = {};
+	std::vector<Eigen::VectorXd> test_x = {};
+	std::vector<double> train_y = {};
+	
+	vec << 1583,1;
+	train_x.push_back(vec);
+	train_y.push_back(2);
+	vec << 1584,1;
+	train_x.push_back(vec);
+	train_y.push_back(23);
 
+	vec << 1585,1;
+	test_x.push_back(vec);
+	GP result;
+	result= Gaussian_Process_Regression(train_x, train_y, test_x);
+	std::cout<<result.mu[0]<<" "<<result.cov[0]<<std::endl;
 }
